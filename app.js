@@ -300,7 +300,7 @@
   function drawQr(cv, text) {
     var qr;
     try { qr = Q.encode(text, 'M'); } catch (e) { try { qr = Q.encode(text, 'L'); } catch (e2) { cv.hidden = true; return false; } }
-    Q.drawToCanvas(cv, qr, Math.max(3, Math.floor(420 / (qr.size + 8))), 4); cv.hidden = false;
+    Q.drawToCanvas(cv, qr, Math.max(4, Math.floor(760 / (qr.size + 8))), 4); cv.hidden = false;
     return true;
   }
   function showQr(canvasId, text) {
@@ -329,27 +329,50 @@
     if (n === 'NotReadableError') return 'The camera is in use by another app. Close it and try again, or paste the code instead.';
     return 'The camera could not be started (' + (n || 'error') + '). Paste the code instead.';
   }
-  /* facing: 'environment' (tablet back camera) | 'user' or null (PC webcam). Returns true if scanning started. */
-  async function scanInto(video, note, onText, facing) {
-    if (!('BarcodeDetector' in window)) { note.textContent = 'This browser cannot read QR codes from the camera (BarcodeDetector is missing). Paste the code instead.'; return false; }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { note.textContent = 'This page cannot use the camera here. Paste the code instead.'; return false; }
+  function scanHint(sec) {
+    if (sec > 14) return 'Still nothing. Ask the other device to press "Make QR bigger", or paste or type the code instead.';
+    return 'Nothing read yet. Move the tablet closer so the code fills the frame, turn the tablet screen brightness right up, and tilt it to avoid reflections.';
+  }
+  /* facing: 'environment' (tablet back camera) | 'user' or null (PC webcam). opts.pureOnly forces the built-in decoder (smoke test).
+     The browser's own BarcodeDetector is tried first when it exists; the built-in pure-JS decoder always runs too, so a PC webcam works in browsers without it.
+     Returns true if scanning started. */
+  async function scanInto(video, note, onText, facing, opts) {
+    opts = opts || {};
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { note.textContent = 'This page cannot use a camera here. Paste or type the code instead.'; return false; }
     stopScan();
-    var det = new BarcodeDetector({ formats: ['qr_code'] });
-    try { scan.stream = await navigator.mediaDevices.getUserMedia({ video: facing ? { facingMode: facing } : true }); }
+    var det = null;
+    if (!opts.pureOnly && 'BarcodeDetector' in window) { try { det = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { det = null; } }
+    var vc = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    if (facing) vc.facingMode = facing;
+    try { scan.stream = await navigator.mediaDevices.getUserMedia({ video: vc }); }
     catch (e) { note.textContent = cameraProblemText(e); return false; }
     scan.video = video; video.srcObject = scan.stream; video.hidden = false;
     try { await video.play(); } catch (e) { /* autoplay quirks: keep going */ }
     note.textContent = 'Point the camera at the QR code...';
-    var busy = false;
+    var busy = false, frame = 0, t0 = now(), cv = document.createElement('canvas'), ctx = cv.getContext('2d', { willReadFrequently: true });
     scan.timer = setInterval(async function () {
       if (busy) return; busy = true;
-      try { var found = await det.detect(video); if (found.length) { var txt = found[0].rawValue; stopScan(); note.textContent = 'QR code read.'; onText(txt); } } catch (e) { /* keep trying */ }
+      try {
+        var txt = null;
+        if (det) { var found = await det.detect(video); if (found.length) txt = found[0].rawValue; }
+        if (!txt && video.videoWidth) {
+          var vw = video.videoWidth, vh = video.videoHeight, sc = Math.min(1, 960 / vw);
+          cv.width = Math.round(vw * sc); cv.height = Math.round(vh * sc);
+          ctx.drawImage(video, 0, 0, cv.width, cv.height);
+          var img = ctx.getImageData(0, 0, cv.width, cv.height);
+          var res = window.LTQrScan.decodeRgba(img.data, cv.width, cv.height, { deep: frame % 3 === 2 }); frame++;
+          if (res) txt = dec.decode(res);
+        }
+        if (txt) { stopScan(); note.textContent = 'QR code read.'; onText(txt); }
+        else { var el = (now() - t0) / 1000; if (el > 5) note.textContent = scanHint(el); }
+      } catch (e) { /* keep trying */ }
       busy = false;
-    }, 300);
+    }, 250);
     return true;
   }
   async function hasCamera() {
-    try { if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices || !('BarcodeDetector' in window)) return false; var d = await navigator.mediaDevices.enumerateDevices(); return d.some(function (x) { return x.kind === 'videoinput'; }); } catch (e) { return false; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
+    try { if (!navigator.mediaDevices.enumerateDevices) return true; var d = await navigator.mediaDevices.enumerateDevices(); return d.length === 0 || d.some(function (x) { return x.kind === 'videoinput'; }); } catch (e) { return true; }
   }
   var startScan = function (onText) { return guard(function () { return scanInto($('scan-video'), $('scan-note'), onText, null); }, null); };
   var scanAnswer = startScan(function (t) { $('a-answer').value = t; acceptAnswer(); });

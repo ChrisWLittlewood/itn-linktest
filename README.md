@@ -18,7 +18,8 @@ A small stand-alone web page that finds out **whether Chris's work PC and work-p
 | `lt-wizard.js` | Pure logic: step state machine, mode suggestion, **verdict** |
 | `lt-code.js` | Pure logic: short pairing codes (minimal SDP + base32) |
 | `lt-core.js` | Pure logic: chunker, back-pressure/ETA, SHA-256, report formatter, long-code fallback |
-| `lt-qr.js` | Tiny QR generator (+ matrix decoder used by tests) |
+| `lt-qr.js` | Tiny QR generator, matrix decoder with Reed-Solomon error correction |
+| `lt-qrscan.js` | **Pure-JS QR reader for camera frames** (no library): thresholds, finder + alignment patterns, perspective sampling |
 | `style.css`, `sw.js`, `manifest.webmanifest`, `icon-192.png`, `icon-512.png` | Layout, share target, install |
 | `tests/`, `smoke/` | Node tests and static checks; Edge smoke test (kept apart so `node --test` never starts a browser) |
 
@@ -29,15 +30,30 @@ Host the folder as is, over https (a github.io path works) or on `localhost`.
 1. **Open the page on both devices.** The first screen asks *I am on the PC* or *I am on the tablet* (the right one is highlighted from touch/browser, and you can always change it).
 2. **PC, step 1: Make a pairing code.** A QR square and a text code appear, with a Copy button.
 3. **Tablet, step 1: Scan the PC's code.** Press *Allow camera and scan* (a sentence explains what the camera is for; it is switched off straight after). If the camera or BarcodeDetector is missing, paste the code instead.
-4. **Tablet, step 2 -> PC, step 2: bring the answer back.** The PC has no camera, so the answer code is shown on the tablet as text with *Copy code* and as a QR, and the PC has a paste box:
-   * **Best:** Copy on the tablet, send to yourself in Teams or Outlook, paste on the PC.
-   * **Type it:** the answer code is about 140 characters (capital letters and digits; case, spaces, dashes, O/0 and I/L/1 mix-ups are forgiven and a check code catches typos).
-   * **Webcam:** if the PC has a webcam (and the browser has BarcodeDetector), a button appears to scan the tablet screen.
+4. **Tablet, step 2 -> PC, step 2: bring the answer back.** The tablet shows its answer as a **large, white-background QR** (button *Make QR bigger* goes full screen; turn the screen brightness up) and as text with *Copy code*. The PC offers three ways, always visible:
+   * **A. Scan with this PC's webcam** (always offered when a camera exists; the camera permission is explained first). Works in Edge without any browser QR support, because the page contains its own QR reader. A live preview with a scan frame is shown; after 5 seconds without a read it says to move the tablet closer / raise the tablet brightness.
+   * **B. Paste:** Copy on the tablet, send to yourself in Teams or Outlook, paste on the PC.
+   * **C. Type** the 140-170 character code (case, spaces, dashes, O/0 and I/L/1 mix-ups are forgiven; a check code catches typos).
 5. **Step 3 connects by itself.** On success both screens jump to step 4. On failure a red box says in plain words what to try.
 6. **Step 4: Run the full link test** (either device; the PC does the work). It measures reply time, sends 25 MB each way, sends a 6 MB test file, interrupts it at 40% and resumes it, checking SHA-256 every time.
 7. **Step 5: the verdict card**, plus *Copy report* (plain text, no IP addresses; contains the verdict, all step results and the code lengths).
 
 The **No pairing needed** tab holds the single-device checks (device report, picker read speed including a OneDrive file, storage, download, share target, tabs and database). The **Advanced tests** tab holds the old manual pairing, same-network listing and USB check.
+
+## QR reading without a browser API
+
+Desktop Edge has no `BarcodeDetector`, so the page carries its own reader (`lt-qrscan.js`). Per camera frame it: converts to grey, binarises (local-mean adaptive, global Otsu, inverted, small threshold shifts), finds the three finder patterns by their 1:1:3:1:1 runs, finds the alignment pattern, builds a perspective transform from four points, samples the module grid (5-point vote per module), then decodes format information, **Reed-Solomon error correction** and byte mode. Every 3rd frame it also tries half and double size. The browser's native `BarcodeDetector` is tried first when it exists; the built-in decoder always runs as well. The camera is released as soon as a code is read.
+
+Measured on synthetic camera images (Node, `tests/qrscan.test.mjs`; the three code sizes below, QR level M):
+
+| Test | Result |
+|---|---|
+| Fixed matrix: scale 3-8 px/module, rotation 0-270 and 15/45/-30/170 degrees, perspective 4-8%, noise, blur, inversion, low contrast, washed out, glare, moire, combined | **99 of 99** (60/60 baseline, 39/39 hard); about 11 ms per image |
+| Randomised sweep (random rotation, 0-8% perspective, noise up to 35, blur up to 2 passes, contrast span 60-255, glare, moire, 10% inverted), 120 images | **117 of 120 = 97.5%** in one frame; the live scanner retries about 4 frames a second, so a steady hold succeeds in practice |
+| Blank, random noise and a chequer pattern | no false reads |
+| Reed-Solomon | corrects up to eccLen/2 errors for every block size, refuses more |
+
+Code sizes: **144 characters** -> QR version 8 (49x49 modules); **157 characters** -> version 9 (53x53); the 2-candidate Wi-Fi offer, **204 characters** -> version 10 (57x57). All at error-correction level M.
 
 ## Pairing code size (measured)
 
@@ -81,14 +97,16 @@ node --test linktest/tests/
 ```
 
 * `core.test.mjs`: chunker, back-pressure and ETA, SHA-256 against Node, block hasher, hash check, long-code text, candidate parsing and redaction, report formatter, QR round trip for every version 1-40.
+* `qrscan.test.mjs`: **the key test**: renders QR images (scale, rotation, perspective, noise, blur, inversion, low contrast, glare, moire; helper `qrimage.mjs`) for the 144 / 157 / 204-character codes and asserts the decoder returns the exact text; plus the randomised sweep, false-positive checks, Reed-Solomon correction.
 * `wizard.test.mjs`: **wizard state machine** (Next only after a pass, Back always, link-opened shortcut, auto-advance rules per mode), **compact code encode/decode round trip** (mDNS, IPv4, srflx, IPv6; typing mistakes; wrong kind; damaged), measured code lengths, **verdict logic** with synthetic results (works / slow / unreliable / incomplete / not connected, advice not repeated once tried, no IP addresses).
 * `static.test.mjs`: strict CSP, no inline code, no network calls, only the mode choice in `sessionStorage`, every element id used by the scripts exists, manifest and icons valid.
-* `smoke/edge_smoke.mjs` (outside `tests/` on purpose): `node linktest/smoke/edge_smoke.mjs`. Starts a local server and headless Edge, loads the page, checks the first screen and wizard step 1, makes a real short code, **loops two peer connections through the compact code format to prove the browser accepts the rebuilt descriptions and opens a data channel**, and runs the single-device safe tests.
+* `smoke/edge_smoke.mjs` (outside `tests/` on purpose): `node linktest/smoke/edge_smoke.mjs`. Starts a local server and headless Edge, loads the page, checks the first screen and wizard step 1, makes a real short code, **loops two peer connections through the compact code format to prove the browser accepts the rebuilt descriptions and opens a data channel**, and runs the single-device safe tests. It also starts Edge with a **fake webcam** (`--use-fake-device-for-media-stream` with a generated video of a 157-character pairing-code QR) and checks that the PC scan path reads it, first with the built-in decoder only and then via the default path, and that the camera is released afterwards.
 
 ## Known limits
 
 * Not yet run in a real browser by the author: the wizard screens, the camera scan and the compact-code acceptance are covered by Node logic tests and by the smoke test written for Edge, not by an actual run. Run the smoke test first; if its loopback line fails, the long code (*Use the long code*) is the built-in fallback.
-* The QR generator is verified by encode -> decode in Node (including error-correction) but not against a real scanner.
+* QR reading is verified on synthetic images and (in the smoke test) on a fake camera, not yet with a real webcam pointed at a real tablet. Webcams read screens poorly in glare or low brightness: raise the tablet brightness, use *Make QR bigger*, hold 20-40 cm away. If reading keeps failing, paste or type the code.
+* The QR generator is verified by encode -> decode in Node (including error-correction) and by the new image decoder, but not against a third-party scanner app.
 * A secure (https) page cannot call a plain-http address on the local network, so there is no "type the other device's IP" probe; the link test is the reachability test.
 * Browsers hide real local IPs behind `.local` names; if the company network blocks that lookup the link can fail even on the same Wi-Fi, and USB tethering avoids it.
 * The offer/answer must be exchanged again after a page reload (there is no server to remember it).

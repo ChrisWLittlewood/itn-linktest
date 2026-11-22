@@ -97,3 +97,15 @@ ul.ftlist li.run { border-color: var(--accent); }
 .strong { font-weight: 700; margin-bottom: 0; }
 .wnav { justify-content: space-between; border-top: 1px solid var(--line); padding-top: .75rem; margin-top: 1rem; }
 @media (max-width: 480px) { button.huge { flex: 1 1 100%; } .wnav button { flex: 1 1 45%; } }
+
+/* ---------- scanning and big QR ---------- */
+.scanbox { position: relative; max-width: 26rem; }
+.scanbox video { display: block; width: 100%; }
+.scanbox video[hidden] + .scanframe { display: none; }
+.scanframe { position: absolute; inset: 12% 18%; border: 4px solid #fff; box-shadow: 0 0 0 2px #000, 0 0 0 9999px rgba(0, 0, 0, .35); border-radius: .6rem; pointer-events: none; }
+.qrwrap { background: #fff; color: #000; text-align: center; padding: .5rem; border-radius: .5rem; margin: .5rem 0; }
+.qrwrap canvas { width: 100%; max-width: 34rem; margin: 0 auto; background: #fff; }
+.qrwrap .qrhint { display: none; color: #000; }
+.qrwrap.qrbig { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 0; padding: 1rem; border-radius: 0; cursor: pointer; }
+.qrwrap.qrbig canvas { width: min(96vw, 82vh); max-width: none; }
+.qrwrap.qrbig .qrhint { display: block; }

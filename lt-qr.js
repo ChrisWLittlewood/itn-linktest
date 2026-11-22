@@ -235,6 +235,48 @@
     return out;
   }
 
+  /* Reed-Solomon error correction (Berlekamp-Massey, Chien search, Forney); roots are alpha^0 .. alpha^(eccLen-1).
+     Returns the corrected codeword array or throws 'error-correction check failed'. */
+  var EXP = new Array(512), LOG = new Array(256);
+  (function () { var x = 1; for (var i = 0; i < 255; i++) { EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 256) x ^= 0x11D; } for (i = 255; i < 512; i++) EXP[i] = EXP[i - 255]; })();
+  function mulT(a, b) { return a && b ? EXP[LOG[a] + LOG[b]] : 0; }
+  function divT(a, b) { return a ? EXP[(LOG[a] + 255 - LOG[b]) % 255] : 0; }
+  function rsCorrect(cw, eccLen) {
+    var n = cw.length, synd = [], bad = false, i, j;
+    for (i = 0; i < eccLen; i++) { var s = 0; for (j = 0; j < n; j++) s = mulT(s, EXP[i]) ^ cw[j]; synd.push(s); if (s) bad = true; }
+    if (!bad) return cw.slice();
+    var C = [1], B = [1], L = 0, m = 1, b = 1;
+    for (var k = 0; k < eccLen; k++) {
+      var d = synd[k];
+      for (i = 1; i <= L; i++) d ^= mulT(C[i] || 0, synd[k - i]);
+      if (d === 0) { m++; continue; }
+      var T = C.slice(), coef = divT(d, b);
+      while (C.length < B.length + m) C.push(0);
+      for (i = 0; i < B.length; i++) C[i + m] ^= mulT(coef, B[i]);
+      if (2 * L <= k) { L = k + 1 - L; B = T; b = d; m = 1; } else m++;
+    }
+    if (L * 2 > eccLen) throw new Error('error-correction check failed');
+    var locs = [];
+    for (var deg = 0; deg < n; deg++) {
+      var xinv = EXP[(255 - deg) % 255], v = 0, p = 1;
+      for (i = 0; i <= L; i++) { v ^= mulT(C[i] || 0, p); p = mulT(p, xinv); }
+      if (v === 0) locs.push(deg);
+    }
+    if (locs.length !== L) throw new Error('error-correction check failed');
+    var omega = [];
+    for (i = 0; i < eccLen; i++) { var o = 0; for (j = 0; j <= i; j++) o ^= mulT(synd[j], C[i - j] || 0); omega.push(o); }
+    var out = cw.slice();
+    locs.forEach(function (deg) {
+      var xi = EXP[(255 - deg) % 255], num = 0, den = 0, pw = 1, t;
+      for (t = 0; t < omega.length; t++) { num ^= mulT(omega[t], pw); pw = mulT(pw, xi); }
+      for (t = 1; t <= L; t += 2) den ^= mulT(C[t] || 0, EXP[((t - 1) * (255 - deg)) % 255]);
+      if (!den) throw new Error('error-correction check failed');
+      out[n - 1 - deg] ^= mulT(EXP[deg % 255], divT(num, den));
+    });
+    for (i = 0; i < eccLen; i++) { var s2 = 0; for (j = 0; j < n; j++) s2 = mulT(s2, EXP[i]) ^ out[j]; if (s2) throw new Error('error-correction check failed'); }
+    return out;
+  }
+
   /* decode a module matrix (array of rows of booleans). Verifies the error-correction codes. Returns Uint8Array. */
   function decodeMatrix(mod) {
     var size = mod.length, v = (size - 17) / 4;
@@ -281,9 +323,10 @@
       var dlen = lens[bi] - L.eccLen, d = blk.slice(0, dlen), e = blk.slice(dlen);
       /* short blocks carry a placeholder slot at index shortLen-eccLen which is not transmitted; rebuild */
       if (bi < L.shortCount) { d = blk.slice(0, L.shortLen - L.eccLen); e = blk.slice(L.shortLen - L.eccLen + 1); }
-      var calc = rsRemainder(d, div);
-      for (var q = 0; q < calc.length; q++) if (calc[q] !== e[q]) throw new Error('error-correction check failed');
-      data = data.concat(d);
+      for (var q = 0; q < d.length; q++) if (d[q] === undefined) d[q] = 0;
+      for (q = 0; q < e.length; q++) if (e[q] === undefined) e[q] = 0;
+      var fixed = rsCorrect(d.concat(e), L.eccLen);
+      data = data.concat(fixed.slice(0, d.length));
     });
     /* parse: mode(4) count then bytes */
     var bp = 0;
@@ -306,5 +349,5 @@
       if (qr.modules[y][x]) ctx.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
   }
 
-  return { encode: encode, decodeMatrix: decodeMatrix, drawToCanvas: drawToCanvas, dataCodewords: dataCodewords };
+  return { encode: encode, decodeMatrix: decodeMatrix, rsCorrect: rsCorrect, rsEncode: function (data, eccLen) { return data.concat(rsRemainder(data, rsDivisor(eccLen))); }, drawToCanvas: drawToCanvas, dataCodewords: dataCodewords };
 });

@@ -83,15 +83,23 @@
 
     <div class="step" data-mode="pc" data-step="2">
       <h3>Bring the tablet&rsquo;s answer back</h3>
-      <p>The tablet now shows an <strong>answer code</strong>. Get it into this PC. Pick the easiest way:</p>
-      <ol class="ways">
-        <li><strong>Best:</strong> on the tablet press <em>Copy code</em>, send it to yourself in Teams or Outlook, open it on this PC and paste it in the box below.</li>
-        <li><strong>Type it:</strong> the answer code is short enough to type from the tablet screen if you prefer (capital letters and digits only; spaces and dashes are ignored).</li>
-        <li id="w-pc-camway" hidden><strong>Webcam:</strong> hold the tablet screen in front of this PC&rsquo;s webcam. <button id="w-pc-cam" class="big">Use this PC&rsquo;s webcam to scan</button></li>
-      </ol>
-      <video id="w-pc-video" playsinline muted hidden></video>
-      <p id="w-pc-camnote" class="small" role="status"></p>
-      <label>Answer code from the tablet<textarea id="w-pc-answer" rows="4" placeholder="Paste or type the answer code here"></textarea></label>
+      <p>The tablet now shows an <strong>answer code</strong> (a square QR code and a text code). Get it into this PC in whichever way is easiest:</p>
+      <div class="card">
+        <h4>A. Scan it with this PC&rsquo;s webcam</h4>
+        <p class="tip">When you press the button the browser will ask to use the <strong>webcam</strong>. It is used only to read the square code on the tablet screen, is switched off straight afterwards, and nothing is recorded or sent anywhere. Hold the tablet 20 to 40 cm from the webcam with the screen brightness turned right up, and make the QR big on the tablet (button &ldquo;Make QR bigger&rdquo;).</p>
+        <button id="w-pc-cam" class="big primary">Scan the tablet&rsquo;s QR with this PC&rsquo;s webcam</button>
+        <div class="scanbox"><video id="w-pc-video" playsinline muted hidden></video><div class="scanframe" aria-hidden="true"></div></div>
+        <p id="w-pc-camnote" class="small" role="status"></p>
+      </div>
+      <div class="card">
+        <h4>B. Paste the answer code</h4>
+        <p>On the tablet press <em>Copy code</em>, send it to yourself in Teams or Outlook, open it on this PC and paste it below.</p>
+      </div>
+      <div class="card">
+        <h4>C. Type the code</h4>
+        <p>The code is about 140 to 170 characters (capital letters and digits; spaces, dashes and lower case are ignored, and a check code catches typing mistakes). Type it from the tablet screen into the box below.</p>
+      </div>
+      <label>Answer code from the tablet (paste or type here)<textarea id="w-pc-answer" rows="4" placeholder="LT2-..."></textarea></label>
       <button id="w-pc-accept" class="big primary">Connect</button>
       <p id="w-pc-err2" class="errbox" role="alert" hidden></p>
     </div>
@@ -134,16 +142,19 @@
 
     <div class="step" data-mode="tablet" data-step="2">
       <h3>Show the answer to the PC</h3>
-      <p>Now the PC needs this tablet&rsquo;s answer code. Pick the easiest way:</p>
+      <p>Now the PC needs this tablet&rsquo;s answer. Pick the easiest way:</p>
       <ol class="ways">
-        <li><strong>Best:</strong> press <em>Copy code</em> below, send it to yourself in Teams or Outlook, open it on the PC and paste it in step 2 there.</li>
+        <li><strong>Webcam:</strong> the PC scans the square below with its webcam (step 2 on the PC). Turn this screen&rsquo;s <strong>brightness right up</strong>, press <em>Make QR bigger</em>, and hold the tablet 20 to 40 cm from the webcam.</li>
+        <li><strong>Best without a webcam:</strong> press <em>Copy code</em>, send it to yourself in Teams or Outlook, open it on the PC and paste it in step 2 there.</li>
         <li><strong>Type it:</strong> the code is short enough to type on the PC from this screen.</li>
-        <li><strong>Webcam:</strong> if the PC has a webcam, it can scan the square below.</li>
       </ol>
       <div id="w-tab-out" hidden>
-        <canvas id="w-tab-qr" width="1" height="1" hidden aria-label="Answer QR code"></canvas>
+        <div id="w-tab-qrwrap" class="qrwrap">
+          <canvas id="w-tab-qr" width="1" height="1" hidden aria-label="Answer QR code"></canvas>
+          <p class="qrhint small">Screen brightness at maximum. Hold steady, 20 to 40 cm from the PC webcam. Tap anywhere to close.</p>
+        </div>
+        <div class="row"><button id="w-tab-qrbig" class="big primary">Make QR bigger (full screen)</button><button id="w-tab-copy" class="big">Copy code</button></div>
         <label>Answer code (as text)<textarea id="w-tab-code" rows="4" readonly></textarea></label>
-        <button id="w-tab-copy" class="big">Copy code</button>
         <p id="w-tab-len" class="small"></p>
       </div>
     </div>
@@ -345,6 +356,7 @@
 
 <script src="lt-core.js"></script>
 <script src="lt-qr.js"></script>
+<script src="lt-qrscan.js"></script>
 <script src="lt-code.js"></script>
 <script src="lt-wizard.js"></script>
 <script src="app.js"></script>

@@ -49,7 +49,11 @@
     }
   }
   function onEnter(n) {
-    if (mode === 'pc' && n === 2) A.hasCamera().then(function (ok) { $('w-pc-camway').hidden = !ok; });
+    if (mode === 'pc' && n === 2) A.hasCamera().then(function (ok) {
+      $('w-pc-cam').disabled = !ok;
+      $('w-pc-camnote').textContent = ok ? '' : 'No webcam was found on this PC. Use B (paste) or C (type) instead.';
+    });
+    if (n !== 2) setBig(false);
     if (n === 3 && lastProblem && !linkOpen) renderProblem(lastProblem);
   }
   function passStep(n, msg) {
@@ -137,6 +141,16 @@
   function tabScan() {
     showMsg($('w-tab-err'), '');
     A.scanInto($('w-tab-video'), $('w-tab-note'), function (t) { $('w-tab-offer').value = t; tabUse(t); }, 'environment');
+  }
+
+  /* big, full-screen QR on the tablet so a PC webcam can read it */
+  function setBig(on) {
+    var wrap = $('w-tab-qrwrap'); if (!wrap) return;
+    wrap.classList.toggle('qrbig', !!on);
+    try {
+      if (on && wrap.requestFullscreen) wrap.requestFullscreen().catch(function () { /* fine without full screen */ });
+      if (!on && document.fullscreenElement) document.exitFullscreen();
+    } catch (e) { /* ignore */ }
   }
 
   /* ---------- connection events ---------- */
@@ -234,6 +248,9 @@
     on('w-pc-run', runTest); on('w-pc-copyrep', copyRep); on('w-pc-redo', redo);
     on('w-tab-scan', tabScan); on('w-tab-use', function () { tabUse($('w-tab-offer').value); });
     on('w-tab-copy', function () { copyFrom($('w-tab-code'), $('w-tab-len')); });
+    on('w-tab-qrbig', function () { setBig(true); });
+    $('w-tab-qrwrap').addEventListener('click', function () { if ($('w-tab-qrwrap').classList.contains('qrbig')) setBig(false); });
+    document.addEventListener('fullscreenchange', function () { if (!document.fullscreenElement) $('w-tab-qrwrap').classList.remove('qrbig'); });
     on('w-tab-again', startAgain); on('w-tab-again2', startAgain);
     on('w-tab-run', runTest); on('w-tab-copyrep', copyRep); on('w-tab-redo', redo);
     A.on('open', onOpen); A.on('problem', onProblem); A.on('ft', onFt); A.on('progress', onProgress); A.on('verdict', renderVerdict);

@@ -194,10 +194,12 @@ test('QR known structure: finder patterns and version-1 module count', () => {
   assert.ok(m[qr.size - 8][8], 'dark module');
 });
 
-test('QR corrupted codeword is detected by the check; too much data throws', () => {
+test('QR: one damaged module is corrected, heavy damage is refused, too much data throws', () => {
   const qr = Q.encode('some pairing text for the link test', 'L');
   const copy = qr.modules.map((r) => r.slice());
-  copy[qr.size - 1][qr.size - 1] = !copy[qr.size - 1][qr.size - 1];
-  assert.throws(() => Q.decodeMatrix(copy), /error-correction/);
+  const one = qr.modules.map((r) => r.slice()); one[qr.size - 1][qr.size - 1] = !one[qr.size - 1][qr.size - 1];
+  assert.equal(Buffer.from(Q.decodeMatrix(one)).toString(), "some pairing text for the link test", "one damaged module is corrected");
+  for (let y = 9; y < 17; y++) for (let x = 9; x < 17; x++) copy[y][x] = !copy[y][x];
+  assert.throws(() => Q.decodeMatrix(copy), /error-correction|not byte|bad|unreadable/);
   assert.throws(() => Q.encode('x'.repeat(3000), 'L'), /Too much data/);
 });

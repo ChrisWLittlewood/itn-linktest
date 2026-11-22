@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = 8971, CDP = 9271;
@@ -24,13 +25,34 @@ const edge = process.env.EDGE || edgePaths.find((p) => fs.existsSync(p));
 if (!edge) { console.error('msedge.exe not found (set EDGE=path)'); process.exit(2); }
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'lt-smoke-'));
+
+// ---- fake webcam: a video file that shows a QR code of a realistic 157-character pairing code ----
+const require = createRequire(import.meta.url);
+const QR = require('../lt-qr.js'), KC = require('../lt-code.js');
+const FP = 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90';
+const fakeSdp = ['v=0', 'o=- 1 2 IN IP4 127.0.0.1', 's=-', 't=0 0', 'm=application 9 UDP/DTLS/SCTP webrtc-datachannel', 'c=IN IP4 0.0.0.0', 'a=ice-ufrag:xKqP', 'a=ice-pwd:7Zs0aB3dEfGhIjKlMnOpQrSt', 'a=fingerprint:sha-256 ' + FP, 'a=setup:active', 'a=mid:0',
+  'a=candidate:1 1 udp 2122260223 192.168.42.129 49152 typ host', 'a=candidate:2 1 udp 2122260223 10.20.30.40 50000 typ host'].join('\r\n') + '\r\n';
+const FAKE_CODE = KC.sdpToCode('a', fakeSdp);
+function writeFakeVideo(file) {
+  const W = 640, H = 480, qr = QR.encode(FAKE_CODE, 'M'), n = qr.size + 8, sc = Math.floor(440 / n), side = n * sc, ox = Math.floor((W - side) / 2), oy = Math.floor((H - side) / 2);
+  const y = Buffer.alloc(W * H, 200);
+  for (let r = 0; r < side; r++) for (let c = 0; c < side; c++) {
+    const mx = Math.floor(c / sc) - 4, my = Math.floor(r / sc) - 4;
+    y[(oy + r) * W + ox + c] = (mx >= 0 && my >= 0 && mx < qr.size && my < qr.size && qr.modules[my][mx]) ? 30 : 230;
+  }
+  const chroma = Buffer.alloc((W / 2) * (H / 2) * 2, 128), parts = [Buffer.from('YUV4MPEG2 W' + W + ' H' + H + ' F10:1 Ip A1:1 C420jpeg\n')];
+  for (let i = 0; i < 5; i++) parts.push(Buffer.from('FRAME\n'), y, chroma);
+  fs.writeFileSync(file, Buffer.concat(parts));
+}
+const fakeVideo = path.join(profile, 'fake-qr.y4m');
+writeFakeVideo(fakeVideo);
 let proc, failed = 0;
 const check = (ok, msg) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg); if (!ok) failed++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
   await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
-  proc = spawn(edge, ['--headless=new', '--remote-debugging-port=' + CDP, '--user-data-dir=' + profile, '--no-first-run', '--disable-extensions', 'about:blank'], { stdio: 'ignore' });
+  proc = spawn(edge, ['--headless=new', '--remote-debugging-port=' + CDP, '--user-data-dir=' + profile, '--no-first-run', '--disable-extensions', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--use-file-for-fake-video-capture=' + fakeVideo, 'about:blank'], { stdio: 'ignore' });
   let targets;
   for (let i = 0; i < 50; i++) { try { targets = await (await fetch(`http://127.0.0.1:${CDP}/json`)).json(); if (targets.length) break; } catch (e) { /* retry */ } await sleep(200); }
   const page = targets.find((t) => t.type === 'page');
@@ -74,6 +96,17 @@ async function main() {
   check(!(await evalJs('document.getElementById("w-next").disabled')) || (await evalJs('LTWiz.state().wiz.current')) === 2, 'step 1 passed (Next enabled or moved on)');
   await evalJs('LTWiz.chooseMode("tablet")');
   check(await evalJs('document.querySelector("#panel-guided .step:not([hidden])").dataset.mode') === 'tablet', 'tablet mode shows tablet steps');
+  // --- PC webcam scan with the built-in decoder (and then the default path) reading a QR from a fake camera ---
+  await evalJs('LTWiz.chooseMode("pc")');
+  for (const [label, opts] of [['built-in decoder only', '{ pureOnly: true }'], ['default path (native BarcodeDetector first when present)', '{}']]) {
+    await evalJs('window.__scanned = null; LTApp.scanInto(document.getElementById("w-pc-video"), document.getElementById("w-pc-camnote"), (t) => { window.__scanned = t; }, null, ' + opts + ')');
+    for (let i = 0; i < 80 && !(await evalJs('window.__scanned')); i++) await sleep(250);
+    const got = await evalJs('window.__scanned');
+    check(got === FAKE_CODE, 'webcam scan (' + label + ') read the ' + FAKE_CODE.length + '-character code' + (got && got !== FAKE_CODE ? ' but text differs' : ''));
+    check(await evalJs('document.getElementById("w-pc-video").hidden'), 'camera released and preview hidden after the scan (' + label + ')');
+    await evalJs('LTApp.stopScan()');
+  }
+  check(await evalJs('LTApp.hasCamera()'), 'a camera is reported, so the PC scan button is enabled');
   // --- real browser acceptance of the compact codes: loop two peer connections through the code format ---
   const loop = await evalJs(`(async () => {
     const K = LTCode, mk = () => new RTCPeerConnection({ iceServers: [] });

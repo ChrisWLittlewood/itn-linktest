@@ -37,7 +37,7 @@ test('every element id used by app.js exists in index.html', () => {
 });
 
 test('no network calls, storage writes or ITN references in app code', () => {
-  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js', 'lt-code.js', 'lt-wizard.js', 'wizard.js']) {
+  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js', 'lt-code.js', 'lt-qrscan.js', 'lt-wizard.js', 'wizard.js']) {
     const s = read(f);
     assert.ok(!/\bfetch\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource/.test(s), f + ' network call');
     assert.ok(!/localStorage|document\.cookie/.test(s), f + ' storage');
@@ -62,5 +62,5 @@ test('manifest has share_target and icons that exist', () => {
 
 test('JS files parse', async () => {
   const { execFileSync } = await import('node:child_process');
-  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js', 'lt-code.js', 'lt-wizard.js', 'wizard.js']) execFileSync(process.execPath, ['--check', path.join(root, f)]);
+  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js', 'lt-code.js', 'lt-qrscan.js', 'lt-wizard.js', 'wizard.js']) execFileSync(process.execPath, ['--check', path.join(root, f)]);
 });

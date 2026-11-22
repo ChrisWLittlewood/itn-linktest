@@ -1,0 +1,60 @@
+:root {
+  --bg: #f6f7f9; --fg: #14181f; --muted: #4b5563; --card: #ffffff; --line: #cbd2dc;
+  --accent: #0b5cd5; --accent-fg: #ffffff;
+  --pass: #0a6b2d; --pass-bg: #d7f2df; --fail: #9b1c1c; --fail-bg: #fde0e0;
+  --ns: #6b4e00; --ns-bg: #fdf0c8; --info: #1f4e79; --info-bg: #dbeafe; --pend: #4b5563; --pend-bg: #e5e7eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1218; --fg: #e8ecf2; --muted: #a6b0bf; --card: #181d27; --line: #323a49;
+    --accent: #6ea8ff; --accent-fg: #07122a;
+    --pass: #7ee2a0; --pass-bg: #123a22; --fail: #ffaaaa; --fail-bg: #4a1818;
+    --ns: #ffd978; --ns-bg: #46370d; --info: #9cc7f5; --info-bg: #14304d; --pend: #a6b0bf; --pend-bg: #2a303c;
+  }
+}
+* { box-sizing: border-box; }
+html { font-size: 17px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.45; }
+header, main { max-width: 64rem; margin: 0 auto; padding: 0 1rem; }
+header { padding-top: 1rem; }
+h1 { margin: 0 0 .25rem; font-size: 1.7rem; }
+h2 { font-size: 1.3rem; margin: 0 0 .25rem; }
+h3 { font-size: 1.05rem; margin: .25rem 0; }
+h4 { margin: 0 0 .5rem; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: .6rem; padding: 1rem; margin: 1rem 0; }
+.card { border: 1px solid var(--line); border-radius: .5rem; padding: .75rem; margin: .75rem 0; }
+.card.inner { margin: 0; }
+.cols { display: grid; grid-template-columns: 1fr; gap: .75rem; }
+@media (min-width: 800px) { .cols { grid-template-columns: 1fr 1fr; } }
+.lead { font-size: 1.05rem; }
+.small { font-size: .85rem; color: var(--muted); }
+.what { color: var(--muted); margin-top: 0; }
+.row { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+button, .btn { font: inherit; min-height: 2.75rem; padding: .5rem 1rem; border-radius: .5rem; border: 2px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; text-decoration: none; display: inline-block; }
+button.big { font-weight: 600; }
+button.primary { background: var(--accent); color: var(--accent-fg); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+label { display: block; margin: .5rem 0; font-weight: 500; }
+label.small, label.check { font-weight: 400; }
+textarea, select, input[type=file] { display: block; width: 100%; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: .4rem; padding: .4rem; margin-top: .25rem; }
+textarea { font-family: ui-monospace, Consolas, monospace; font-size: .8rem; }
+select { width: auto; display: inline-block; }
+progress { width: min(20rem, 100%); height: 1.1rem; vertical-align: middle; }
+canvas { display: block; max-width: 100%; height: auto; margin: .5rem 0; image-rendering: pixelated; background: #fff; }
+video { width: 100%; max-width: 24rem; border-radius: .5rem; }
+code { background: var(--bg); padding: 0 .25rem; border-radius: .25rem; }
+details summary { cursor: pointer; font-weight: 600; min-height: 2rem; }
+.trow { border-top: 1px solid var(--line); padding: .6rem 0; }
+.trow h3 { display: inline; margin-right: .5rem; }
+.badge { display: inline-block; font-weight: 700; font-size: .8rem; padding: .15rem .55rem; border-radius: 1rem; letter-spacing: .02em; }
+.badge.pass { color: var(--pass); background: var(--pass-bg); }
+.badge.fail { color: var(--fail); background: var(--fail-bg); }
+.badge.ns { color: var(--ns); background: var(--ns-bg); }
+.badge.info { color: var(--info); background: var(--info-bg); }
+.badge.pend { color: var(--pend); background: var(--pend-bg); }
+.sum { margin: .3rem 0; }
+.meaning { margin: .2rem 0; font-size: .92rem; color: var(--muted); }
+pre.det { white-space: pre-wrap; word-break: break-word; font-size: .8rem; background: var(--bg); border-radius: .4rem; padding: .5rem; margin: .3rem 0; max-height: 18rem; overflow: auto; }
+[hidden] { display: none !important; }
+@media (max-width: 480px) { html { font-size: 16px; } section { padding: .75rem; } button.big { flex: 1 1 100%; } }

@@ -1,0 +1,25 @@
+{
+  "name": "ITN Link Test",
+  "short_name": "Link Test",
+  "description": "Finds out which direct links work between your devices. Sends nothing to any server.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f1218",
+  "theme_color": "#0b5cd5",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ],
+  "share_target": {
+    "action": "./share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [ { "name": "file", "accept": ["*/*"] } ]
+    }
+  }
+}

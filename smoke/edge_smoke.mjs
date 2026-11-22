@@ -60,6 +60,37 @@ async function main() {
   check(all.tab === 'PASS', 'tab + database PASS');
   const rep = await evalJs('LT.buildReport()');
   check(/^ITN LINK TEST REPORT/.test(rep) && !/\b\d+\.\d+\.\d+\.\d+\b/.test(rep), 'report text built without IP addresses');
+  // --- first screen and wizard (v2) ---
+  check(await evalJs('!document.getElementById("screen-mode").hidden && document.getElementById("app").hidden'), 'first screen shows only the two mode buttons');
+  await evalJs('LTWiz.chooseMode("pc")');
+  check(await evalJs('document.getElementById("w-progress").textContent') === 'Step 1 of 5: Make a pairing code', 'PC wizard starts at Step 1 of 5');
+  check(await evalJs('document.querySelectorAll("#panel-guided .step:not([hidden])").length') === 1, 'exactly one step visible');
+  check(await evalJs('document.getElementById("w-next").disabled'), 'Next is disabled until the step passes');
+  await evalJs('document.getElementById("w-pc-make").click()');
+  for (let i = 0; i < 40 && (await evalJs('document.getElementById("w-pc-code").value')) === ''; i++) await sleep(500);
+  const code = await evalJs('document.getElementById("w-pc-code").value');
+  check(/^LT2-/.test(code), 'PC step 1 produced a short code (' + code.length + ' characters)');
+  check(await evalJs('!document.getElementById("w-pc-qr").hidden'), 'QR square is shown');
+  check(!(await evalJs('document.getElementById("w-next").disabled')) || (await evalJs('LTWiz.state().wiz.current')) === 2, 'step 1 passed (Next enabled or moved on)');
+  await evalJs('LTWiz.chooseMode("tablet")');
+  check(await evalJs('document.querySelector("#panel-guided .step:not([hidden])").dataset.mode') === 'tablet', 'tablet mode shows tablet steps');
+  // --- real browser acceptance of the compact codes: loop two peer connections through the code format ---
+  const loop = await evalJs(`(async () => {
+    const K = LTCode, mk = () => new RTCPeerConnection({ iceServers: [] });
+    const gather = (pc) => new Promise((r) => { if (pc.iceGatheringState === 'complete') return r(); setTimeout(r, 6000); pc.addEventListener('icegatheringstatechange', () => pc.iceGatheringState === 'complete' && r()); });
+    const a = mk(), b = mk(), dcA = a.createDataChannel('t');
+    const opened = new Promise((r) => { dcA.onopen = () => r(true); setTimeout(() => r(false), 15000); });
+    await a.setLocalDescription(await a.createOffer()); await gather(a);
+    const offerCode = K.sdpToCode('o', a.localDescription.sdp);
+    await b.setRemoteDescription({ type: 'offer', sdp: K.codeToSdp(offerCode, 'o').sdp });
+    await b.setLocalDescription(await b.createAnswer()); await gather(b);
+    const ansCode = K.sdpToCode('a', b.localDescription.sdp);
+    await a.setRemoteDescription({ type: 'answer', sdp: K.codeToSdp(ansCode, 'a').sdp });
+    const ok = await opened; a.close(); b.close();
+    return { ok, offerLen: offerCode.length, ansLen: ansCode.length };
+  })()`);
+  console.log('compact-code loopback:', JSON.stringify(loop));
+  check(loop.ok, 'browser opened a data channel using only the compact codes (offer ' + loop.offerLen + ', answer ' + loop.ansLen + ' characters)');
   check(logs.length === 0, 'no console errors / CSP violations' + (logs.length ? ': ' + logs.join(' | ') : ''));
   ws.close();
 }

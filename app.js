@@ -1,8 +1,11 @@
 /* ITN Link Test - page logic. No network requests, no storage. Synthetic random data only. */
 (function () {
   'use strict';
-  var C = window.LTCore, Q = window.LTQr;
-  var VERSION = '1.0.0';
+  var C = window.LTCore, Q = window.LTQr, Code = window.LTCode, W = window.LTWizard;
+  var VERSION = '2.0.0';
+  var listeners = { open: [], problem: [], ft: [], verdict: [], progress: [] };
+  function on_(name, fn) { listeners[name].push(fn); }
+  function emit(name, arg) { listeners[name].forEach(function (f) { try { f(arg); } catch (e) { console.error(e); } }); }
   var MB = C.MB, CHUNK = 16384, HIGH = 4 * MB, LOW = MB;
   var $ = function (id) { return document.getElementById(id); };
   var delay = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
@@ -154,8 +157,19 @@
     if (!window.DecompressionStream) throw new Error('This browser cannot read compressed pairing text');
     return new Uint8Array(await new Response(new Blob([u8.subarray(1)]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
   }
-  async function toSignalText(kind, sdp) { return C.packSignal(kind, await compress(enc.encode(sdp))); }
+  function longCodeWanted() { var el = document.getElementById('w-long'); return !!(el && el.checked); }
+  async function toSignalText(kind, sdp) {
+    S.hadMdns = S.hadMdns || /\.local \d+ typ host/.test(sdp);
+    var text = null;
+    if (!longCodeWanted()) { try { text = Code.sdpToCode(kind, sdp); } catch (e) { S.compactNote = 'Short code not possible here (' + e.message + '); used the long code instead.'; } }
+    if (!text) text = C.packSignal(kind, await compress(enc.encode(sdp)));
+    S.codes[kind === 'o' ? 'offer' : 'answer'] = text.length;
+    return text;
+  }
   async function fromSignalText(text, kind) {
+    if (Code.isCode(text)) {
+      try { var r = Code.codeToSdp(text, kind); S.codes[kind === 'o' ? 'offer' : 'answer'] = String(text).replace(/\s+/g, '').length; return r.sdp; } catch (e) { throw soft(e.message); }
+    }
     var u;
     try { u = C.unpackSignal(text); } catch (e) { throw soft(e.message); }
     if (u.kind !== kind) throw soft(kind === 'o' ? 'That is an ANSWER text. Device B needs the OFFER from device A.' : 'That is an OFFER text. Device A needs the ANSWER from device B.');
@@ -163,7 +177,7 @@
   }
 
   /* ---------- 2. WebRTC ---------- */
-  var S = { pc: null, dc: null, role: null, rx: null, tx: null, partial: null, peerNet: null, localNet: null, rtts: [], pairWatch: null };
+  var S = { codes: { offer: 0, answer: 0 }, hadMdns: false, compactNote: '', verdict: null, ft: null, driver: false, pc: null, dc: null, role: null, rx: null, tx: null, partial: null, peerNet: null, localNet: null, rtts: [], pairWatch: null };
   var tpStats = { sent: null, recv: null };
 
   function newPc() {
@@ -194,6 +208,8 @@
     if (!quiet) showState();
   }
   function linkFailed(msg) {
+    if (S.dc && S.dc.readyState === 'open') return;
+    emit('problem', { message: msg, hadMdns: S.hadMdns, stun: $('stun').checked, network: $('network').value });
     if (results.link.status === 'PASS') return;
     setResult('link', 'FAIL', 'No direct link. ' + msg + ' Often Wi-Fi client isolation or a firewall; try USB tethering / hotspot (section 3).', results.link.details);
   }
@@ -227,50 +243,68 @@
     var typeNote = info && (info.local === 'relay' || info.remote === 'relay') ? 'relay (traffic goes through a server!)' : info && (info.local === 'srflx' || info.remote === 'srflx') ? 'srflx (found through STUN)' : 'host (direct, local)';
     $('link-info').textContent = 'Candidate type used: ' + typeNote + ' - ' + kinds + '.';
     setResult('link', 'PASS', 'Connected. Candidate type used: ' + typeNote + '.', ['Candidates: ' + kinds, 'Network chosen by you: ' + $('network').value, 'Role: ' + (S.role === 'A' ? 'offerer (A)' : 'answerer (B)')]);
+    S.pair = info;
+    emit('open', { candidate: info ? (info.local === 'relay' || info.remote === 'relay' ? 'relay' : (info.local === 'srflx' || info.remote === 'srflx' ? 'srflx' : 'host')) : 'host' });
     runPing();
     try { send({ t: 'net', subnets: S.localNet ? S.localNet.subnets : [], mdns: S.localNet ? S.localNet.mdns : 0 }); } catch (e) { /* ignore */ }
     updateNet();
   }
 
-  var makeOffer = guard(async function () {
-    if (!window.RTCPeerConnection) { setResult('link', 'NOT SUPPORTED', 'This browser has no WebRTC.'); return; }
-    setResult('link', 'NOT RUN', 'Making the offer...');
+  async function createOffer() {
+    if (!window.RTCPeerConnection) throw soft('This browser has no WebRTC, so a direct link is not possible here.');
+    S.hadMdns = false; S.compactNote = '';
     var pc = newPc(); S.role = 'A';
     setupDc(pc.createDataChannel('lt', { ordered: true }));
     await pc.setLocalDescription(await pc.createOffer());
     await gather(pc);
     var text = await toSignalText('o', pc.localDescription.sdp);
-    $('a-offer').value = text; showQr('a-qr', text);
-    setResult('link', 'NOT RUN', 'Offer ready. Give it to device B (scan the QR or copy the text), then paste B\'s answer here.');
-    waitOpen(120000);
-  }, 'link');
-  var makeAnswer = guard(async function () {
-    if (!window.RTCPeerConnection) { setResult('link', 'NOT SUPPORTED', 'This browser has no WebRTC.'); return; }
-    var sdp = await fromSignalText($('b-offer').value, 'o');
-    setResult('link', 'NOT RUN', 'Making the answer...');
+    waitOpen(180000);
+    return text;
+  }
+  async function acceptOffer(offerText) {
+    if (!window.RTCPeerConnection) throw soft('This browser has no WebRTC, so a direct link is not possible here.');
+    var sdp = await fromSignalText(offerText, 'o');
+    S.hadMdns = false; S.compactNote = '';
     var pc = newPc(); S.role = 'B';
     pc.ondatachannel = function (e) { setupDc(e.channel); };
     await pc.setRemoteDescription({ type: 'offer', sdp: sdp });
     await pc.setLocalDescription(await pc.createAnswer());
     await gather(pc);
     var text = await toSignalText('a', pc.localDescription.sdp);
+    waitOpen(180000);
+    return text;
+  }
+  async function acceptAnswerText(answerText) {
+    if (!S.pc || S.role !== 'A') throw soft('First make a pairing code on this device.');
+    var sdp = await fromSignalText(answerText, 'a');
+    await S.pc.setRemoteDescription({ type: 'answer', sdp: sdp });
+    waitOpen(30000);
+  }
+  var makeOffer = guard(async function () {
+    setResult('link', 'NOT RUN', 'Making the offer...');
+    var text = await createOffer();
+    $('a-offer').value = text; showQr('a-qr', text);
+    setResult('link', 'NOT RUN', 'Offer ready (' + text.length + ' characters). Give it to device B (scan the QR or copy the text), then paste B\'s answer here.');
+  }, 'link');
+  var makeAnswer = guard(async function () {
+    setResult('link', 'NOT RUN', 'Making the answer...');
+    var text = await acceptOffer($('b-offer').value);
     $('b-answer').value = text; showQr('b-qr', text);
-    setResult('link', 'NOT RUN', 'Answer ready. Show it to device A (scan the QR or copy the text). The link opens when A has used it.');
-    waitOpen(120000);
+    setResult('link', 'NOT RUN', 'Answer ready (' + text.length + ' characters). Show it to device A (scan the QR or copy the text). The link opens when A has used it.');
   }, 'link');
   var acceptAnswer = guard(async function () {
-    if (!S.pc || S.role !== 'A') throw soft('First make an offer on this device (A).');
-    var sdp = await fromSignalText($('a-answer').value, 'a');
-    await S.pc.setRemoteDescription({ type: 'answer', sdp: sdp });
+    await acceptAnswerText($('a-answer').value);
     setResult('link', 'NOT RUN', 'Connecting...');
-    waitOpen(30000);
   }, 'link');
+  /* draw a QR for the text; medium error correction when it fits (easier to scan), low otherwise. Returns false if too long. */
+  function drawQr(cv, text) {
+    var qr;
+    try { qr = Q.encode(text, 'M'); } catch (e) { try { qr = Q.encode(text, 'L'); } catch (e2) { cv.hidden = true; return false; } }
+    Q.drawToCanvas(cv, qr, Math.max(3, Math.floor(420 / (qr.size + 8))), 4); cv.hidden = false;
+    return true;
+  }
   function showQr(canvasId, text) {
-    var cv = $(canvasId);
-    try {
-      var qr = Q.encode(text, 'L');
-      Q.drawToCanvas(cv, qr, Math.max(2, Math.floor(420 / (qr.size + 8))), 4); cv.hidden = false;
-    } catch (e) { cv.hidden = true; $('scan-note').textContent = 'The text is too long for a QR code on this browser (' + e.message + ') - use copy/paste.'; }
+    if (!drawQr($(canvasId), text)) $('scan-note').textContent = 'The text is too long for a QR code (' + text.length + ' characters) - use copy/paste.';
   }
   function copyText(id, noteId) {
     var el = $(id); el.select();
@@ -279,26 +313,45 @@
     else { document.execCommand('copy'); done(); }
   }
 
-  /* QR scanning */
-  var scan = { stream: null, timer: null };
-  function stopScan() { clearInterval(scan.timer); if (scan.stream) scan.stream.getTracks().forEach(function (t) { t.stop(); }); scan.stream = null; $('scan-video').hidden = true; $('scan-video').srcObject = null; }
-  var startScan = function (onText) {
-    return guard(async function () {
-      if (!('BarcodeDetector' in window)) { $('scan-note').textContent = 'This browser cannot scan QR codes (no BarcodeDetector). Use the text boxes instead.'; return; }
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('scan-note').textContent = 'No camera access from this page. Use the text boxes.'; return; }
-      stopScan();
-      var det = new BarcodeDetector({ formats: ['qr_code'] });
-      scan.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      var v = $('scan-video'); v.srcObject = scan.stream; v.hidden = false; await v.play();
-      $('scan-note').textContent = 'Point the camera at the QR code...';
-      var busy = false;
-      scan.timer = setInterval(async function () {
-        if (busy) return; busy = true;
-        try { var found = await det.detect(v); if (found.length) { var txt = found[0].rawValue; stopScan(); $('scan-note').textContent = 'QR read.'; onText(txt); } } catch (e) { /* keep trying */ }
-        busy = false;
-      }, 300);
-    }, null);
-  };
+  /* QR scanning (camera released as soon as a code is read, on stop, or when the page is hidden) */
+  var scan = { stream: null, timer: null, video: null };
+  function stopScan() {
+    clearInterval(scan.timer); scan.timer = null;
+    if (scan.stream) scan.stream.getTracks().forEach(function (t) { t.stop(); });
+    scan.stream = null;
+    if (scan.video) { scan.video.hidden = true; scan.video.srcObject = null; }
+    scan.video = null;
+  }
+  function cameraProblemText(e) {
+    var n = e && e.name;
+    if (n === 'NotAllowedError' || n === 'SecurityError') return 'The camera was blocked. Allow the camera for this page in the browser (lock icon in the address bar), or paste the code instead.';
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return 'No camera was found on this device. Paste the code instead.';
+    if (n === 'NotReadableError') return 'The camera is in use by another app. Close it and try again, or paste the code instead.';
+    return 'The camera could not be started (' + (n || 'error') + '). Paste the code instead.';
+  }
+  /* facing: 'environment' (tablet back camera) | 'user' or null (PC webcam). Returns true if scanning started. */
+  async function scanInto(video, note, onText, facing) {
+    if (!('BarcodeDetector' in window)) { note.textContent = 'This browser cannot read QR codes from the camera (BarcodeDetector is missing). Paste the code instead.'; return false; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { note.textContent = 'This page cannot use the camera here. Paste the code instead.'; return false; }
+    stopScan();
+    var det = new BarcodeDetector({ formats: ['qr_code'] });
+    try { scan.stream = await navigator.mediaDevices.getUserMedia({ video: facing ? { facingMode: facing } : true }); }
+    catch (e) { note.textContent = cameraProblemText(e); return false; }
+    scan.video = video; video.srcObject = scan.stream; video.hidden = false;
+    try { await video.play(); } catch (e) { /* autoplay quirks: keep going */ }
+    note.textContent = 'Point the camera at the QR code...';
+    var busy = false;
+    scan.timer = setInterval(async function () {
+      if (busy) return; busy = true;
+      try { var found = await det.detect(video); if (found.length) { var txt = found[0].rawValue; stopScan(); note.textContent = 'QR code read.'; onText(txt); } } catch (e) { /* keep trying */ }
+      busy = false;
+    }, 300);
+    return true;
+  }
+  async function hasCamera() {
+    try { if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices || !('BarcodeDetector' in window)) return false; var d = await navigator.mediaDevices.enumerateDevices(); return d.some(function (x) { return x.kind === 'videoinput'; }); } catch (e) { return false; }
+  }
+  var startScan = function (onText) { return guard(function () { return scanInto($('scan-video'), $('scan-note'), onText, null); }, null); };
   var scanAnswer = startScan(function (t) { $('a-answer').value = t; acceptAnswer(); });
   var scanOffer = startScan(function (t) { $('b-offer').value = t; makeAnswer(); });
 
@@ -334,13 +387,14 @@
       $('tp-recv-txt').textContent = (ok ? 'Done: ' : 'MISMATCH: ') + C.formatBytes(rx.got) + ' in ' + C.formatDuration(ms / 1000) + ' = ' + C.formatRate(rate) + ', hash ' + (ok ? 'matches' : 'DOES NOT MATCH') + '.';
       tpStats.recv = { ok: ok, rate: rate, bytes: rx.got };
       tpDone();
+      if (S.waitRecv) { var wr = S.waitRecv; S.waitRecv = null; wr(tpStats.recv); }
       send({ t: 'tp-result', id: m.id, ok: ok, bytes: rx.got, ms: ms });
     },
     'tp-result': function (m) {
       if (S.tx && S.tx.id === m.id) {
         var rate = m.bytes / (m.ms / 1000);
         $('tp-send-txt').textContent = (m.ok ? 'Delivered and verified: ' : 'FAILED verification: ') + C.formatBytes(m.bytes) + ' at ' + C.formatRate(rate) + ' (measured by the receiver).';
-        tpStats.sent = { ok: m.ok, rate: rate, bytes: m.bytes }; S.tx = null; tpDone();
+        tpStats.sent = { ok: m.ok, rate: rate, bytes: m.bytes }; var rs = S.tx.resolve; S.tx = null; tpDone(); rs(tpStats.sent);
       }
     },
     'f-start': function (m) {
@@ -351,15 +405,60 @@
     'f-end': async function (m) { await finishFileRx(m); },
     'f-drop': function () { interruptedRx('The sender stopped the transfer (simulated drop).'); },
     'f-resume': async function (m) {
-      var f = $('f-pick').files[0];
+      var f = S.txFileObj || $('f-pick').files[0];
       var r = C.resumeOffset(f ? { name: f.name, size: f.size } : null, m);
       if (!r.ok) { send({ t: 'f-resume-no', why: r.reason }); return; }
       send({ t: 'f-resume-ok', id: m.id, offset: r.offset });
       await sendFile(f, r.offset, m.id, true);
     },
     'f-resume-ok': function (m) { if (S.partial && S.partial.id === m.id) { S.rx = S.partial; S.rx.t0 = now() - 1; S.rx.base = S.rx.got; S.rx.resumed = true; } },
-    'f-resume-no': function (m) { setResult('resume', 'FAIL', 'The sender could not resume: ' + m.why + '.'); }
+    'f-resume-no': function (m) { setResult('resume', 'FAIL', 'The sender could not resume: ' + m.why + '.'); if (S.fileDone) { var fd0 = S.fileDone; S.fileDone = null; fd0({ ok: false, resumed: false, why: m.why }); } },
+    'f-done': function (m) { if (S.fileDone) { var f = S.fileDone; S.fileDone = null; f(m); } },
+    'ft-run': function () { if (S.driver) return runFullTest(); },
+    'ft-resume': function () { return fResume(); },
+    'ft-step': function (m) { emit('ft', m); },
+    'ft-verdict': function (m) { S.verdict = m.v; if (m.codes) S.peerCodes = m.codes; emit('verdict', m.v); }
   };
+  /* ---------- the full link test (driven by the PC) ---------- */
+  function ftUpdate(key, state, text) { var m = { t: 'ft-step', key: key, state: state, text: text || '' }; emit('ft', m); try { send(m); } catch (e) { /* ignore */ } }
+  function withTimeout(p, ms, what) { return new Promise(function (res, rej) { var t = setTimeout(function () { rej(new Error(what + ' took too long.')); }, ms); p.then(function (v) { clearTimeout(t); res(v); }, function (e) { clearTimeout(t); rej(e); }); }); }
+  async function runFullTest() {
+    if (S.ft) return S.ft;
+    if (!S.dc || S.dc.readyState !== 'open') throw soft('The link is not open. Pair the devices first.');
+    S.ft = (async function () {
+      var cand = (S.pair && (S.pair.local === 'relay' || S.pair.remote === 'relay')) ? 'relay' : (S.pair && (S.pair.local === 'srflx' || S.pair.remote === 'srflx')) ? 'srflx' : 'host';
+      var r = { connected: true, hadMdns: S.hadMdns, stun: $('stun').checked, network: $('network').value, candidate: cand, errors: [], codeLen: S.codes };
+      function step(key, label) { return { run: function (t) { ftUpdate(key, 'run', t || ''); }, ok: function (t) { ftUpdate(key, 'ok', t); }, fail: function (t) { ftUpdate(key, 'fail', t); r.errors.push(label + ': ' + t); } }; }
+      var s1 = step('rtt', 'Reply time'); s1.run();
+      try { var p = await pingOnce(); r.rttMs = p.med; s1.ok(p.med.toFixed(0) + ' ms'); } catch (e) { s1.fail(e.message); }
+      var s2 = step('out', 'PC to tablet'); s2.run();
+      try { var o = await withTimeout(sendRandom(25), 240000, 'Sending'); r.out = o; (o.ok ? s2.ok : s2.fail)(C.formatRate(o.rate) + (o.ok ? ', data intact' : ', DATA DAMAGED')); } catch (e) { s2.fail(e.message); }
+      var s3 = step('in', 'Tablet to PC'); s3.run();
+      try { var pr = new Promise(function (res) { S.waitRecv = res; }); send({ t: 'tp-pull', mb: 25 }); var i2 = await withTimeout(pr, 240000, 'Receiving'); r.inn = i2; (i2.ok ? s3.ok : s3.fail)(C.formatRate(i2.rate) + (i2.ok ? ', data intact' : ', DATA DAMAGED')); } catch (e) { S.waitRecv = null; s3.fail(e.message); }
+      var s4 = step('file', 'Test file'), s5 = step('resume', 'Interrupted transfer'); s4.run();
+      try {
+        var blobs = []; for (var k = 0; k < 6; k++) blobs.push(makeBlock(k));
+        var file = new File(blobs, 'itn-linktest-synthetic.bin', { type: 'application/octet-stream' });
+        var done = new Promise(function (res) { S.fileDone = res; });
+        S.autoDropAt = Math.floor(file.size * 0.4 / CHUNK) * CHUNK;
+        await sendFile(file, 0, null, false);
+        s5.run('dropping at 40% and resuming');
+        await delay(300);
+        send({ t: 'ft-resume' });
+        var fd = await withTimeout(done, 120000, 'Finishing the file');
+        r.file = { ok: !!fd.ok }; (fd.ok ? s4.ok : s4.fail)(fd.ok ? 'arrived intact' : 'DID NOT MATCH');
+        r.resume = { ok: !!(fd.ok && fd.resumed) }; (r.resume.ok ? s5.ok : s5.fail)(r.resume.ok ? 'continued after the drop' : (fd.why || 'did not resume'));
+      } catch (e) { S.autoDropAt = 0; S.fileDone = null; s4.fail(e.message); s5.fail('not tested'); }
+      var v = W.verdict(r);
+      S.verdict = v; S.ftInput = r;
+      try { send({ t: 'ft-verdict', v: v, codes: S.codes }); } catch (e) { /* ignore */ }
+      emit('verdict', v);
+      return v;
+    })();
+    S.ft.then(function () { S.ft = null; }, function () { S.ft = null; });
+    return S.ft;
+  }
+  function askRunTest() { send({ t: 'ft-run' }); }
   function tpDone() {
     var a = tpStats.sent, b = tpStats.recv, L = [];
     if (a) L.push('Sent: ' + C.formatBytes(a.bytes) + ' at ' + C.formatRate(a.rate) + ' - ' + (a.ok ? 'hash OK' : 'HASH MISMATCH'));
@@ -369,8 +468,9 @@
   }
   function showProgress(prefix, done, total, ms) {
     var p = C.progressStats({ done: done, total: total, elapsedMs: ms });
-    $(prefix + (prefix === 'tp-recv' || prefix === 'tp-send' ? '-bar' : '-bar')).value = p.pct;
-    $(prefix + '-txt').textContent = Math.round(p.pct) + '% - ' + C.formatBytes(done) + ' of ' + C.formatBytes(total) + ' - ' + C.formatRate(p.rate) + ' - about ' + (isFinite(p.etaSec) ? C.formatDuration(p.etaSec) : '?') + ' left';
+    var txt = Math.round(p.pct) + '% - ' + C.formatBytes(done) + ' of ' + C.formatBytes(total) + ' - ' + C.formatRate(p.rate) + ' - about ' + (isFinite(p.etaSec) ? C.formatDuration(p.etaSec) : '?') + ' left';
+    $(prefix + '-bar').value = p.pct; $(prefix + '-txt').textContent = txt;
+    emit('progress', { prefix: prefix, pct: p.pct, text: txt });
   }
 
   /* round-trip time */
@@ -394,6 +494,7 @@
     var line = 'Round-trip time: median ' + med.toFixed(1) + ' ms (min ' + vals[0].toFixed(1) + ', max ' + vals[vals.length - 1].toFixed(1) + ')' + (info && info.rtt ? '; ICE reports ' + (info.rtt * 1000).toFixed(0) + ' ms' : '');
     $('link-info').textContent = $('link-info').textContent.split(' Round-trip')[0] + ' ' + line;
     addDetail('link', line);
+    return { med: med, min: vals[0], max: vals[vals.length - 1] };
   }
 
   /* back-pressure send loop */
@@ -429,7 +530,9 @@
       var total = mb * MB, id = Math.random().toString(36).slice(2);
       var pool = new Uint8Array(MB); for (var i = 0; i < MB; i += 65536) crypto.getRandomValues(pool.subarray(i, i + 65536));
       var hasher = new C.BlockHasher(digest), n = 0;
-      S.tx = { id: id }; tpStats.sent = null;
+      var resultP = new Promise(function (res, rej) { S.tx = { id: id, resolve: res }; setTimeout(function () { rej(new Error('The other device did not confirm the data in time.')); }, 180000); });
+      resultP.catch(function () { });
+      tpStats.sent = null;
       send({ t: 'tp-start', id: id, total: total });
       var t0 = now();
       await pump(total, 0, function (off, len) {
@@ -440,6 +543,7 @@
       send({ t: 'tp-end', id: id, sha: sha });
       $('tp-send-txt').textContent = 'Sent ' + C.formatBytes(total) + ' in ' + C.formatDuration((now() - t0) / 1000) + '. Waiting for the other device to verify...';
     } finally { busy = false; }
+    return resultP;
   }
   var tpSend = guard(function () { return sendRandom(parseInt($('tp-mb').value, 10)); }, 'tp');
   var tpPull = guard(function () { send({ t: 'tp-pull', mb: parseInt($('tp-mb').value, 10) }); $('tp-recv-txt').textContent = 'Asked the other device to send...'; }, 'tp');
@@ -456,7 +560,7 @@
   var fileCtl = { abort: false };
   async function sendFile(file, from, id, isResume) {
     if (busy && !isResume) throw soft('Another transfer is running.');
-    busy = true; fileCtl.abort = false;
+    busy = true; fileCtl.abort = false; S.txFileObj = file;
     try {
       var sha;
       if (!isResume) {
@@ -470,7 +574,7 @@
       var sent = await pump(file.size, from, async function (off, len) {
         if (!block || off < bs || off + len > bs + block.length) { bs = off; block = new Uint8Array(await file.slice(off, Math.min(file.size, off + MB)).arrayBuffer()); }
         return block.subarray(off - bs, off - bs + len);
-      }, function (s, ms) { showProgress('f', s, file.size, ms); }, fileCtl);
+      }, function (s, ms) { showProgress('f', s, file.size, ms); if (S.autoDropAt && s >= S.autoDropAt) { S.autoDropAt = 0; fileCtl.abort = true; } }, fileCtl);
       if (fileCtl.abort) { try { send({ t: 'f-drop' }); } catch (e) { /* ignore */ } $('f-txt').textContent = 'Dropped at ' + C.formatBytes(sent) + ' (simulated). Press Resume on the receiving device.'; return; }
       if (!sha) sha = await hashFile(file, function () { });
       send({ t: 'f-end', id: id, sha: sha });
@@ -506,6 +610,7 @@
     var line = (ok ? 'Hash matches: ' : 'HASH DOES NOT MATCH: ') + rx.name + ', ' + C.formatBytes(blob.size) + ', SHA-256 ' + hex.slice(0, 16) + '...';
     $('f-txt').textContent = line;
     setResult('file', ok ? 'PASS' : 'FAIL', line, ['Receive time ' + C.formatDuration(ms / 1000) + ' (' + C.formatRate((rx.got - (rx.base || 0)) / (ms / 1000)) + (resumed ? ', resumed transfer' : '') + ')']);
+    try { send({ t: 'f-done', ok: ok, resumed: resumed, rate: (rx.got - (rx.base || 0)) / (ms / 1000), bytes: blob.size }); } catch (e) { /* link gone */ }
     if (resumed) setResult('resume', ok ? 'PASS' : 'FAIL', ok ? 'Transfer was interrupted and resumed; the hash still matches.' : 'Resumed transfer did not match.', []);
     if (ok) {
       if ($('f-save')._url) URL.revokeObjectURL($('f-save')._url);
@@ -717,7 +822,12 @@
   }, null);
   function buildReport() {
     var secs = DEFS.map(function (d) { var r = results[d[0]]; return { title: d[1], status: r.status, summary: r.summary, details: r.details }; });
-    return C.formatReport({ version: VERSION, generated: new Date().toISOString(), network: $('network').value, role: $('role').value, sections: secs, suggestions: C.suggestDesign(results, $('network').value) });
+    var pre = [];
+    if (S.verdict) { pre.push('VERDICT: ' + S.verdict.headline); S.verdict.lines.forEach(function (x) { pre.push('  ' + x); }); S.verdict.next.forEach(function (x) { pre.push('  Next: ' + x); }); }
+    else pre.push('VERDICT: the full link test has not been run on this device pair yet.');
+    var cl = S.codes.offer || (S.peerCodes && S.peerCodes.offer), ca = S.codes.answer || (S.peerCodes && S.peerCodes.answer);
+    if (cl || ca) pre.push('Pairing code length: PC code ' + (cl || '?') + ' characters, tablet answer ' + (ca || '?') + ' characters' + (S.compactNote ? ' (' + S.compactNote + ')' : ''));
+    return C.formatReport({ version: VERSION, generated: new Date().toISOString(), network: $('network').value, role: (window.LTApp && window.LTApp.mode) || 'unknown', preface: pre, sections: secs, suggestions: C.suggestDesign(results, $('network').value) });
   }
   function renderReport() { $('report').value = buildReport(); }
   var copyReport = guard(async function () {
@@ -745,7 +855,9 @@
     if (!window.RTCPeerConnection) setResult('link', 'NOT SUPPORTED', 'This browser has no WebRTC.');
     initBc(); initShareTarget();
     window.addEventListener('pagehide', stopScan);
+    document.addEventListener('visibilitychange', function () { if (document.hidden) stopScan(); });
   }
+  window.LTApp = { mode: null, createOffer: createOffer, acceptOffer: acceptOffer, acceptAnswer: acceptAnswerText, on: on_, send: send, runFullTest: runFullTest, askRunTest: askRunTest, scanInto: scanInto, stopScan: stopScan, hasCamera: hasCamera, drawQr: drawQr, closeLink: closeLink, copyReport: copyReport, buildReport: buildReport, setDriver: function (b) { S.driver = !!b; }, state: S, results: results, soft: soft };
   window.LT = { results: results, runCapabilities: runDev, runAllSafe: runAll, buildReport: buildReport, collectDevice: collectDevice, version: VERSION };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

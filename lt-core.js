@@ -384,6 +384,7 @@
     L.push('Generated: ' + (rep.generated || '?'));
     if (rep.network) L.push('Network used for the link test: ' + rep.network);
     if (rep.role) L.push('Device role: ' + rep.role);
+    if (rep.preface && rep.preface.length) { L.push(''); rep.preface.forEach(function (x) { L.push(x); }); }
     L.push('');
     (rep.sections || []).forEach(function (s) {
       L.push('[' + s.status + '] ' + s.title);

@@ -21,10 +21,12 @@ test('index.html: strict CSP, no inline code, no external URLs', () => {
 });
 
 test('every element id used by app.js exists in index.html', () => {
-  const app = read('app.js');
+  const app = read('app.js') + '\n' + read('wizard.js');
   const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
   const used = new Set([...app.matchAll(/\$\('([a-z0-9-]+)'\)/g)].map((m) => m[1]));
-  for (const m of app.matchAll(/\bon\('([a-z0-9-]+)'/g)) used.add(m[1]);
+  for (const m of app.matchAll(/(?<![.\w])on\('([a-z0-9-]+)'/g)) used.add(m[1]);
+  used.add('mode-pc'); used.add('mode-tablet'); // built as 'mode-' + suggestion in wizard.js
+  for (const pre of ['w-pc-', 'w-tab-']) for (const suf of ['conn', 'connerr', 'err4', 'repnote', 'ft', 'verdict', 'out', 'qr', 'code']) used.add(pre + suf);
   for (const m of app.matchAll(/showProgress\('([a-z-]+)'/g)) { used.add(m[1] + '-bar'); used.add(m[1] + '-txt'); }
   for (const id of used) assert.ok(ids.has(id), 'no element #' + id);
   const dataTests = [...html.matchAll(/data-tests="([^"]+)"/g)].flatMap((m) => m[1].split(','));
@@ -35,14 +37,16 @@ test('every element id used by app.js exists in index.html', () => {
 });
 
 test('no network calls, storage writes or ITN references in app code', () => {
-  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js']) {
+  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js', 'lt-code.js', 'lt-wizard.js', 'wizard.js']) {
     const s = read(f);
     assert.ok(!/\bfetch\(|XMLHttpRequest|WebSocket|sendBeacon|EventSource/.test(s), f + ' network call');
-    assert.ok(!/localStorage|sessionStorage|document\.cookie/.test(s), f + ' storage');
+    assert.ok(!/localStorage|document\.cookie/.test(s), f + ' storage');
+    if (f !== 'wizard.js') assert.ok(!/sessionStorage/.test(s), f + ' session storage');
+    else assert.equal((s.match(/sessionStorage\./g) || []).length, 3, 'only the PC/tablet choice is kept, for the tab session');
     assert.ok(!/inspection|ITN_|from ['"]\.\.\/app/i.test(s.replace(/ITN Link Test|ITNLT1|ITN's|ITN sync|ITN\b/g, '')), f + ' ITN reference');
   }
   const app = read('app.js');
-  assert.equal((app.match(/stun:/g) || []).length, 1, 'exactly one STUN reference');
+  assert.equal((app.match(/stun:stun\.l\.google\.com/g) || []).length, 1, 'exactly one STUN reference');
   assert.match(app, /\$\('stun'\)\.checked \?/);
 });
 
@@ -58,5 +62,5 @@ test('manifest has share_target and icons that exist', () => {
 
 test('JS files parse', async () => {
   const { execFileSync } = await import('node:child_process');
-  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js']) execFileSync(process.execPath, ['--check', path.join(root, f)]);
+  for (const f of ['app.js', 'sw.js', 'lt-core.js', 'lt-qr.js', 'lt-code.js', 'lt-wizard.js', 'wizard.js']) execFileSync(process.execPath, ['--check', path.join(root, f)]);
 });

@@ -14,41 +14,234 @@
 <body>
 <header>
   <h1>ITN Link Test</h1>
-  <p class="lead">Finds out which direct links work between your PC and your tablet. Open this page on both devices. Nothing is sent to any server, nothing is stored, no ITN data is read.</p>
-  <div class="row">
-    <button id="run-all" class="big primary">Run all safe tests</button>
-    <button id="copy-report" class="big">Copy report</button>
-  </div>
-  <p class="small">&ldquo;Run all safe tests&rdquo; never asks for permission. Tests that need a picker, a camera or a second device are run with their own button.</p>
-  <label class="small">Which network are the two devices on for the link test?
-    <select id="network">
-      <option>Office Wi-Fi</option>
-      <option>PC hotspot / tablet hotspot</option>
-      <option>USB tethering</option>
-      <option>Other</option>
-    </select>
-  </label>
-  <label class="small">This device is the
-    <select id="role"><option>PC</option><option>Tablet</option><option>Other</option></select>
-  </label>
-  <p id="copy-note" class="small" role="status"></p>
+  <p class="lead">Finds out whether your PC and your tablet can send files straight to each other, with no server in between.</p>
+  <details class="box" open>
+    <summary>What this page will and will not do</summary>
+    <ul>
+      <li><strong>Will:</strong> make a direct link between the two devices, send random test data across it, and tell you in plain words whether it works and how fast.</li>
+      <li><strong>Will not:</strong> send anything to a server, store anything, read ITN data, change any setting, or turn on developer mode or USB debugging.</li>
+      <li>The report you can copy contains no IP addresses. Your PC / tablet choice is remembered only until you close this tab.</li>
+    </ul>
+  </details>
 </header>
 
 <main>
+<section id="screen-mode" aria-labelledby="h-mode">
+  <h2 id="h-mode">Which device are you using right now?</h2>
+  <p class="what">Open this same page on both devices. Choose the right button on each one.</p>
+  <div class="modebtns">
+    <button id="mode-pc" class="huge primary">I am on the PC</button>
+    <button id="mode-tablet" class="huge primary">I am on the tablet</button>
+  </div>
+  <p id="mode-hint" class="small" role="status"></p>
+  <p><button id="to-quick" class="big">No second device? Run the single-device checks</button></p>
+</section>
+
+<div id="app" hidden>
+  <div class="topbar">
+    <p class="small">You are on: <strong id="mode-badge"></strong> <button id="change-mode" class="linkbtn">Change</button></p>
+    <div class="tabs" role="group" aria-label="Page sections">
+      <button id="tab-guided" class="tab" aria-pressed="true">Guided link test</button>
+      <button id="tab-quick" class="tab" aria-pressed="false">No pairing needed</button>
+      <button id="tab-adv" class="tab" aria-pressed="false">Advanced tests</button>
+    </div>
+  </div>
+
+  <section id="panel-guided" aria-labelledby="h-guided">
+    <h2 id="h-guided">Guided link test</h2>
+    <details class="card">
+      <summary>Connection options</summary>
+      <label class="small">How are the PC and the tablet connected?
+        <select id="network">
+          <option>Office Wi-Fi</option>
+          <option>USB tethering</option>
+          <option>Hotspot</option>
+          <option>Other</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="stun"> Also try a public STUN server. This makes <strong>one outside request</strong> (to <code>stun.l.google.com</code>) to learn this device&rsquo;s public address. Leave it off unless the plain link failed. Set it on both devices <em>before</em> making the code.</label>
+      <label class="check"><input type="checkbox" id="w-long"> Use the long code instead of the short code (only if the short code is rejected).</label>
+    </details>
+
+    <ol id="w-strip" class="strip" aria-label="Progress"></ol>
+    <p id="w-progress" class="progress-label" role="status" aria-live="polite"></p>
+
+    <!-- ================= PC ================= -->
+    <div class="step" data-mode="pc" data-step="1">
+      <h3>Make a pairing code</h3>
+      <p>Press the button. A square code (QR) and a text code appear on this screen. They are used once and mean nothing to anyone else.</p>
+      <button id="w-pc-make" class="big primary">Make a pairing code</button>
+      <div id="w-pc-out" hidden>
+        <canvas id="w-pc-qr" width="1" height="1" hidden aria-label="Pairing QR code to scan with the tablet"></canvas>
+        <label>Code (as text)<textarea id="w-pc-code" rows="4" readonly></textarea></label>
+        <button id="w-pc-copy" class="big">Copy code</button>
+        <p id="w-pc-len" class="small"></p>
+        <p class="tip"><strong>Next:</strong> take the tablet, open this page, press &ldquo;I am on the tablet&rdquo; and scan the square on this screen. If the tablet cannot scan it, copy the text code and send it to yourself in Teams or Outlook, then paste it on the tablet.</p>
+      </div>
+      <p id="w-pc-err" class="errbox" role="alert" hidden></p>
+    </div>
+
+    <div class="step" data-mode="pc" data-step="2">
+      <h3>Bring the tablet&rsquo;s answer back</h3>
+      <p>The tablet now shows an <strong>answer code</strong>. Get it into this PC. Pick the easiest way:</p>
+      <ol class="ways">
+        <li><strong>Best:</strong> on the tablet press <em>Copy code</em>, send it to yourself in Teams or Outlook, open it on this PC and paste it in the box below.</li>
+        <li><strong>Type it:</strong> the answer code is short enough to type from the tablet screen if you prefer (capital letters and digits only; spaces and dashes are ignored).</li>
+        <li id="w-pc-camway" hidden><strong>Webcam:</strong> hold the tablet screen in front of this PC&rsquo;s webcam. <button id="w-pc-cam" class="big">Use this PC&rsquo;s webcam to scan</button></li>
+      </ol>
+      <video id="w-pc-video" playsinline muted hidden></video>
+      <p id="w-pc-camnote" class="small" role="status"></p>
+      <label>Answer code from the tablet<textarea id="w-pc-answer" rows="4" placeholder="Paste or type the answer code here"></textarea></label>
+      <button id="w-pc-accept" class="big primary">Connect</button>
+      <p id="w-pc-err2" class="errbox" role="alert" hidden></p>
+    </div>
+
+    <div class="step" data-mode="pc" data-step="3">
+      <h3>Connecting</h3>
+      <p id="w-pc-conn" role="status">Waiting for the two devices to find each other. This normally takes a few seconds.</p>
+      <div id="w-pc-connerr" class="errbox" role="alert" hidden></div>
+      <button id="w-pc-again" class="big">Start again</button>
+    </div>
+
+    <div class="step" data-mode="pc" data-step="4">
+      <h3>Run the full link test</h3>
+      <p>This takes about a minute. It measures the reply time, sends 25 MB each way, sends a test file and interrupts it halfway to check it can continue. Keep both screens on.</p>
+      <button id="w-pc-run" class="big primary">Run the full link test</button>
+      <ul id="w-pc-ft" class="ftlist"></ul>
+      <p><progress class="w-bar" max="100" value="0"></progress> <span class="w-bartxt small"></span></p>
+      <p id="w-pc-err4" class="errbox" role="alert" hidden></p>
+    </div>
+
+    <div class="step" data-mode="pc" data-step="5">
+      <h3>Result</h3>
+      <div id="w-pc-verdict" class="verdict" role="status" aria-live="polite"><p>No result yet. Run the full link test in step 4.</p></div>
+      <div class="row"><button id="w-pc-copyrep" class="big primary">Copy report</button><button id="w-pc-redo" class="big">Run the test again</button><button id="w-pc-again2" class="big">Start again</button></div>
+      <p id="w-pc-repnote" class="small" role="status"></p>
+    </div>
+
+    <!-- ================= TABLET ================= -->
+    <div class="step" data-mode="tablet" data-step="1">
+      <h3>Scan the PC&rsquo;s code</h3>
+      <p>On the PC, open this page, press &ldquo;I am on the PC&rdquo; and make a pairing code. Then scan the square on the PC screen with this tablet.</p>
+      <p class="tip">When you press the button, the browser will ask to use the <strong>camera</strong>. It is used only to read that square, it is switched off straight afterwards, and nothing is recorded or sent anywhere.</p>
+      <button id="w-tab-scan" class="big primary">Allow camera and scan</button>
+      <video id="w-tab-video" playsinline muted hidden></video>
+      <p id="w-tab-note" class="small" role="status"></p>
+      <label>Camera not working? Paste or type the PC&rsquo;s code here instead<textarea id="w-tab-offer" rows="4" placeholder="Paste the PC's code here"></textarea></label>
+      <button id="w-tab-use" class="big">Use this code</button>
+      <p id="w-tab-err" class="errbox" role="alert" hidden></p>
+    </div>
+
+    <div class="step" data-mode="tablet" data-step="2">
+      <h3>Show the answer to the PC</h3>
+      <p>Now the PC needs this tablet&rsquo;s answer code. Pick the easiest way:</p>
+      <ol class="ways">
+        <li><strong>Best:</strong> press <em>Copy code</em> below, send it to yourself in Teams or Outlook, open it on the PC and paste it in step 2 there.</li>
+        <li><strong>Type it:</strong> the code is short enough to type on the PC from this screen.</li>
+        <li><strong>Webcam:</strong> if the PC has a webcam, it can scan the square below.</li>
+      </ol>
+      <div id="w-tab-out" hidden>
+        <canvas id="w-tab-qr" width="1" height="1" hidden aria-label="Answer QR code"></canvas>
+        <label>Answer code (as text)<textarea id="w-tab-code" rows="4" readonly></textarea></label>
+        <button id="w-tab-copy" class="big">Copy code</button>
+        <p id="w-tab-len" class="small"></p>
+      </div>
+    </div>
+
+    <div class="step" data-mode="tablet" data-step="3">
+      <h3>Connecting</h3>
+      <p id="w-tab-conn" role="status">Waiting for the PC to use your answer. Once it does, the devices connect by themselves.</p>
+      <div id="w-tab-connerr" class="errbox" role="alert" hidden></div>
+      <button id="w-tab-again" class="big">Start again</button>
+    </div>
+
+    <div class="step" data-mode="tablet" data-step="4">
+      <h3>Run the full link test</h3>
+      <p>The PC does the work; this screen shows what is happening. Keep both screens on and do not leave this page.</p>
+      <button id="w-tab-run" class="big primary">Run the full link test</button>
+      <ul id="w-tab-ft" class="ftlist"></ul>
+      <p><progress class="w-bar" max="100" value="0"></progress> <span class="w-bartxt small"></span></p>
+      <p id="w-tab-err4" class="errbox" role="alert" hidden></p>
+    </div>
+
+    <div class="step" data-mode="tablet" data-step="5">
+      <h3>Result</h3>
+      <div id="w-tab-verdict" class="verdict" role="status" aria-live="polite"><p>No result yet. Run the full link test in step 4.</p></div>
+      <div class="row"><button id="w-tab-copyrep" class="big primary">Copy report</button><button id="w-tab-redo" class="big">Run the test again</button><button id="w-tab-again2" class="big">Start again</button></div>
+      <p id="w-tab-repnote" class="small" role="status"></p>
+    </div>
+
+    <div class="row wnav">
+      <button id="w-back" class="big">Back</button>
+      <button id="w-next" class="big primary">Next</button>
+    </div>
+  </section>
+
+  <div id="panel-quick" hidden>
+    <section aria-labelledby="h-quick">
+      <h2 id="h-quick">No pairing needed</h2>
+      <p class="what">These tests need only this one device: device report, reading a file from the picker (including a OneDrive file), share target, storage and tabs.</p>
+      <div class="row"><button id="run-all" class="big primary">Run all safe tests</button></div>
+      <p class="small">&ldquo;Run all safe tests&rdquo; never asks for permission. Tests that need a picker are run with their own button.</p>
+    </section>
 <section id="sec-dev" aria-labelledby="h-dev">
   <h2 id="h-dev">1. Device report</h2>
   <p class="what">What this device and browser can do. No prompts.</p>
   <div class="row"><button id="run-dev" class="big">Run device report</button><button id="run-selftest" class="big">Run hash + compression self-test</button></div>
   <div class="tests" data-tests="dev,selftest"></div>
 </section>
-
+<section id="sec-fs" aria-labelledby="h-fs">
+  <h2 id="h-fs">5. File system</h2>
+  <p class="what">How fast this device can read and write files from a page. Test file size: 50 MB of random data, deleted afterwards.</p>
+  <div class="card">
+    <h3>PC: folder test</h3>
+    <p class="small">You pick an empty or scratch folder; the app creates, writes, reads and deletes one 50 MB file in it.</p>
+    <button id="run-fsdir" class="big">Pick a folder and test</button>
+  </div>
+  <div class="card">
+    <h3>Tablet or PC: browser private storage and download</h3>
+    <div class="row"><button id="run-opfs" class="big">Test private storage (OPFS) speed</button><button id="run-dl" class="big">Download a generated 50 MB file</button></div>
+  </div>
+  <div class="card">
+    <h3>Read a file from the system picker (the OneDrive picker problem)</h3>
+    <p class="small">Choose a large file. On the tablet choose it from OneDrive in the picker, then choose a local copy of a similar size, and compare. A cloud file that is not on the device is slow or fails.</p>
+    <input type="file" id="pick-file" aria-label="Choose a file to read">
+    <div class="row"><button id="run-pick" class="big">Read the chosen file</button><button id="cancel-pick" class="big">Cancel</button></div>
+    <p><progress id="pick-bar" max="100" value="0"></progress> <span id="pick-txt" class="small"></span></p>
+  </div>
+  <div class="tests" data-tests="fsdir,opfs,dl,pick"></div>
+</section>
+<section id="sec-share" aria-labelledby="h-share">
+  <h2 id="h-share">6. Share</h2>
+  <p class="what">Can this device share a file out, and can it receive one shared in from another app (for example the OneDrive app)?</p>
+  <div class="row"><button id="run-canshare" class="big">Check file sharing</button><button id="run-share" class="big">Share a small test file</button></div>
+  <div class="card">
+    <h3>Receive: share target</h3>
+    <ol>
+      <li>On the tablet, open this page in Chrome and choose Install app (or Add to home screen).</li>
+      <li>Open the OneDrive app, long-press a file, choose Share, then pick &ldquo;ITN Link Test&rdquo;.</li>
+      <li>This page opens and shows the name, size and SHA-256 of what was received. The file itself is not kept.</li>
+    </ol>
+    <p id="target-note" class="small"></p>
+  </div>
+  <div class="tests" data-tests="canshare,target"></div>
+</section>
+<section id="sec-tab" aria-labelledby="h-tab">
+  <h2 id="h-tab">7. Same-origin tabs and database</h2>
+  <p class="what">Checks tab messaging and the browser database that ITN&rsquo;s existing manual flows use. For the cross-tab part, open this page in a second tab, then press the button.</p>
+  <div class="row"><button id="run-tab" class="big">Run tab + database test</button><button id="tab-ping" class="big">Ping other tabs</button></div>
+  <div class="tests" data-tests="tab"></div>
+</section>
+  </div>
+  <div id="panel-adv" hidden>
+    <p class="what">The individual tests, one by one, for when you want to look closer. The pairing here is the manual version of the guided steps (device A = PC or tablet, whichever starts).</p>
 <section id="sec-p2p" aria-labelledby="h-p2p">
   <h2 id="h-p2p">2. Direct link between the two devices (WebRTC, no server)</h2>
   <p class="what">Pair the two devices by QR code or by copy/paste text. Then measure speed, check data arrives intact, send a file and test an interrupted transfer.</p>
 
   <div class="card">
     <h3>Step 1: pair</h3>
-    <label class="check"><input type="checkbox" id="stun"> Also try a public STUN server (default OFF). This makes one outside request to <code>stun.l.google.com</code> to learn this device&rsquo;s public address; use it only if the plain link fails. Your corporate filter may block it.</label>
+    <p class="small">The STUN and code-length options are in &ldquo;Connection options&rdquo; on the Guided tab.</p>
     <div class="cols">
       <div class="card inner">
         <h4>Device A (starts)</h4>
@@ -101,7 +294,6 @@
   </div>
   <div class="tests" data-tests="link,tp,file,resume"></div>
 </section>
-
 <section id="sec-net" aria-labelledby="h-net">
   <h2 id="h-net">3. Same-network check</h2>
   <p class="what">Are the two devices on the same network? Browsers hide real local addresses behind random <code>.local</code> names, and a secure page may not call a plain-http address, so this app shows what the browser exposes and compares the two devices once the link is open.</p>
@@ -118,7 +310,6 @@
     </ol>
   </details>
 </section>
-
 <section id="sec-usb" aria-labelledby="h-usb">
   <h2 id="h-usb">4. USB</h2>
   <p class="what">What the browser can see over USB (WebUSB). This only lists devices; it never changes any setting.</p>
@@ -128,72 +319,35 @@
     <p>When the PC shows the tablet in Windows Explorer, the tablet is using MTP (media transfer). MTP is a transfer protocol, not a drive or folder. Browsers cannot talk MTP, and WebUSB blocks the device classes that Windows already uses for it. The only way to make a phone or tablet reachable from a web page over USB is USB debugging (ADB) or similar developer settings. This app does <strong>not</strong> try to turn any of that on and does not need it. Dragging files in Explorer keeps working; it just cannot be driven by a web page.</p>
   </details>
 </section>
-
-<section id="sec-fs" aria-labelledby="h-fs">
-  <h2 id="h-fs">5. File system</h2>
-  <p class="what">How fast this device can read and write files from a page. Test file size: 50 MB of random data, deleted afterwards.</p>
-  <div class="card">
-    <h3>PC: folder test</h3>
-    <p class="small">You pick an empty or scratch folder; the app creates, writes, reads and deletes one 50 MB file in it.</p>
-    <button id="run-fsdir" class="big">Pick a folder and test</button>
   </div>
-  <div class="card">
-    <h3>Tablet or PC: browser private storage and download</h3>
-    <div class="row"><button id="run-opfs" class="big">Test private storage (OPFS) speed</button><button id="run-dl" class="big">Download a generated 50 MB file</button></div>
-  </div>
-  <div class="card">
-    <h3>Read a file from the system picker (the OneDrive picker problem)</h3>
-    <p class="small">Choose a large file. On the tablet choose it from OneDrive in the picker, then choose a local copy of a similar size, and compare. A cloud file that is not on the device is slow or fails.</p>
-    <input type="file" id="pick-file" aria-label="Choose a file to read">
-    <div class="row"><button id="run-pick" class="big">Read the chosen file</button><button id="cancel-pick" class="big">Cancel</button></div>
-    <p><progress id="pick-bar" max="100" value="0"></progress> <span id="pick-txt" class="small"></span></p>
-  </div>
-  <div class="tests" data-tests="fsdir,opfs,dl,pick"></div>
-</section>
 
-<section id="sec-share" aria-labelledby="h-share">
-  <h2 id="h-share">6. Share</h2>
-  <p class="what">Can this device share a file out, and can it receive one shared in from another app (for example the OneDrive app)?</p>
-  <div class="row"><button id="run-canshare" class="big">Check file sharing</button><button id="run-share" class="big">Share a small test file</button></div>
-  <div class="card">
-    <h3>Receive: share target</h3>
-    <ol>
-      <li>On the tablet, open this page in Chrome and choose Install app (or Add to home screen).</li>
-      <li>Open the OneDrive app, long-press a file, choose Share, then pick &ldquo;ITN Link Test&rdquo;.</li>
-      <li>This page opens and shows the name, size and SHA-256 of what was received. The file itself is not kept.</li>
-    </ol>
-    <p id="target-note" class="small"></p>
-  </div>
-  <div class="tests" data-tests="canshare,target"></div>
-</section>
+  <section aria-labelledby="h-rep">
+    <h2 id="h-rep">Report</h2>
+    <p class="small">Plain text, no IP addresses. Copy it and send it to the release owner.</p>
+    <div class="row"><button id="copy-report" class="big">Copy report</button></div>
+    <p id="copy-note" class="small" role="status"></p>
+    <textarea id="report" rows="10" readonly aria-label="Report text"></textarea>
+  </section>
 
-<section id="sec-tab" aria-labelledby="h-tab">
-  <h2 id="h-tab">7. Same-origin tabs and database</h2>
-  <p class="what">Checks tab messaging and the browser database that ITN&rsquo;s existing manual flows use. For the cross-tab part, open this page in a second tab, then press the button.</p>
-  <div class="row"><button id="run-tab" class="big">Run tab + database test</button><button id="tab-ping" class="big">Ping other tabs</button></div>
-  <div class="tests" data-tests="tab"></div>
-</section>
-
-<section id="sec-about" aria-labelledby="h-about">
-  <h2 id="h-about">About / what this app does NOT do</h2>
-  <ul>
-    <li>It sends <strong>nothing</strong> to any server. The page makes no network requests of its own. The only exception is the optional STUN box, which is off unless you tick it.</li>
-    <li>It stores <strong>nothing</strong>. Nothing is kept after you close the page. Test files are created in memory or in private browser storage and deleted straight after. The only thing the browser keeps is a tiny service worker that exists so the Share target can work; it holds no files and no pages.</li>
-    <li>It reads <strong>no ITN data</strong>, contains no ITN code and uses only random test data.</li>
-    <li>It does <strong>not</strong> turn on developer mode, USB debugging or any security setting, and does not try to get around the company web filter.</li>
-    <li>It does not upload your report. &ldquo;Copy report&rdquo; puts plain text on your clipboard; you paste it where you choose. The report contains no IP addresses.</li>
-  </ul>
-  <p class="small">Link Test version <span id="ver"></span>.</p>
-</section>
-
-<section aria-labelledby="h-rep">
-  <h2 id="h-rep">Report</h2>
-  <textarea id="report" rows="12" readonly aria-label="Report text"></textarea>
-</section>
+  <section id="sec-about" aria-labelledby="h-about">
+    <h2 id="h-about">About / what this app does NOT do</h2>
+    <ul>
+      <li>It sends <strong>nothing</strong> to any server. The page makes no network requests of its own. The only exception is the optional STUN box in &ldquo;Connection options&rdquo;, which is off unless you tick it.</li>
+      <li>It stores <strong>nothing</strong>. Nothing is kept after you close the page. Your PC / tablet choice is held for this browser tab only. Test files are created in memory or in private browser storage and deleted straight after. The only thing the browser keeps is a tiny service worker that exists so the Share target can work; it holds no files and no pages.</li>
+      <li>It reads <strong>no ITN data</strong>, contains no ITN code and uses only random test data.</li>
+      <li>It does <strong>not</strong> turn on developer mode, USB debugging or any security setting, and does not try to get around the company web filter.</li>
+      <li>The camera (tablet) is used only to read the pairing code and is switched off straight after.</li>
+    </ul>
+    <p class="small">Link Test version <span id="ver"></span>.</p>
+  </section>
+</div>
 </main>
 
 <script src="lt-core.js"></script>
 <script src="lt-qr.js"></script>
+<script src="lt-code.js"></script>
+<script src="lt-wizard.js"></script>
 <script src="app.js"></script>
+<script src="wizard.js"></script>
 </body>
 </html>
